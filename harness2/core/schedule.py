@@ -20,10 +20,13 @@ globs over one. Scheme: <bench>-<substrate>-<mode><k>[-s<seed>][-<tag>].
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
 import re
+import sys
+import time
 import traceback
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -303,17 +306,52 @@ def _load_old(path: Path) -> dict:
         return {}
 
 
+@contextlib.contextmanager
+def _exclusive_lock(handle):
+    """Hold an exclusive whole-file lock on `handle`.
+
+    POSIX uses `fcntl.flock`; Windows has no `fcntl`, so `msvcrt.locking` stands in.
+    `msvcrt` only locks bytes that exist, and `LK_NBLCK` fails instead of blocking,
+    so we size the file to one byte and retry until the lock is ours.
+    """
+    if sys.platform == "win32":
+        import msvcrt
+
+        handle.flush()
+        if os.fstat(handle.fileno()).st_size < 1:
+            handle.write("\0")
+            handle.flush()
+        while True:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def _write_summary(summary_path: Path, res: TaskResult) -> None:
     """Merge `res` into the summary under an flock, atomically, deriving the merged status.
 
     Modes may be written by separate processes, so records accumulate per mode.
     """
-    import fcntl
-
     lock = summary_path.with_suffix(".lock")
     with open(lock, "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
-        try:
+        with _exclusive_lock(lf):
             merged = res.to_dict()
             if summary_path.is_file():
                 old = _load_old(summary_path)
@@ -354,8 +392,6 @@ def _write_summary(summary_path: Path, res: TaskResult) -> None:
             tmp = summary_path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(merged, indent=2, default=str))
             os.replace(tmp, summary_path)
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def _resolve_libraries(
