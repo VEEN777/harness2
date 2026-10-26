@@ -3,14 +3,27 @@
 
 # Python environments and build outputs.
 .venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 /build/
 /dist/
+build/
+dist/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Run outputs (the HARNESS2_RUNS_DIR default).
 /runs/
+runs/
 
 # Checkouts, runtimes and data downloaded by harness2-setup.
 /dependencies/*
