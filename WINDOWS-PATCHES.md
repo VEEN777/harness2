@@ -6,6 +6,28 @@ natively on Windows instead of WSL. Upstream targets POSIX (see the
 
 Both patches are no-ops on Linux/macOS.
 
+## Decision: local-only (recorded 2026-10-27)
+
+These patches stay local. Not proposed upstream, not re-litigated each session.
+
+- Upstream `origin/main` is `1cfe254` (2026-10-13) and has **not** fixed either
+  issue - `schedule.py`, `tree.py` and `pyproject.toml` are untouched there - so
+  both patches are still required on Windows.
+- Upstream targets POSIX by design: the README says "Use Linux", the classifier
+  said `Operating System :: POSIX`, and CI has no Windows lane. The `msvcrt`
+  lock path is Windows-only code upstream cannot exercise.
+- The trade is cheap on this side: a two-commit divergence we already carry and
+  verify locally, versus a Google CLA plus review of a patch the project has no
+  reason to support.
+- The `tree.py` change is the exception worth revisiting: it is a genuine
+  consistency fix - `harness2/core/context.py` already uses `.as_posix()` at
+  three sites and `tree.py` was the lone `str(...)` outlier - so it stands on
+  its own merits, independent of Windows.
+
+Revisit when: upstream fixes either issue at the source (drop that local patch),
+or this checkout has to be consumed by something other than this machine (then
+propose `tree.py` on its own and keep the lock local).
+
 ## 1. `harness2/core/schedule.py` — no `fcntl` on Windows
 
 `_write_summary()` did a bare `import fcntl` and held an `flock` while merging the
